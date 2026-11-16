@@ -1,0 +1,80 @@
+# hashd mirror build: the two static Linux binaries hashd pins, built from this
+# branch (an upstream tag plus hashd's patches) with upstream's own recipe --
+# the build, candidate and packaging steps of _build.yml's build-linux-portable
+# job, with the stripped candidate packaged as upstream's releases do.
+# Runs on every push to a hashd/<upstream tag> branch; the binary reports that
+# tag as its version. The archives and their provenance attestations are the
+# output. Publishing them as a release is a separate, manual step.
+name: hashd Linux portable
+
+on:
+  push:
+    branches:
+      - 'hashd/v*'
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Build release binary with UI (static)
+        run: scripts/build.sh --with-ui --version "${GITHUB_REF_NAME#hashd/}" CC=gcc CXX=g++ STATIC=1
+
+      - name: Verify release static linking
+        run: |
+          file build/c/codebase-memory-mcp
+          ldd build/c/codebase-memory-mcp 2>&1 | grep -q "not a dynamic executable" || ldd build/c/codebase-memory-mcp 2>&1 | grep -q "statically linked"
+
+      - name: Derive candidates and package the stripped one
+        run: |
+          export VERSION="${GITHUB_REF_NAME#hashd/}"
+          target="linux-${{ matrix.arch }}-portable"
+          scripts/ci/prepare-release-candidates.sh \
+            linux "${{ matrix.arch }}-portable" \
+            --binary build/c/codebase-memory-mcp \
+            --out-dir release-candidates
+          scripts/gen-third-party-notices.sh "release-candidates/$target/THIRD_PARTY_NOTICES.md"
+          selected="release-candidates/$target/stripped/codebase-memory-mcp"
+          selected_sha="$(sha256sum "$selected" | cut -d' ' -f1)"
+          scripts/package-release.sh linux "${{ matrix.arch }}-portable" \
+            --selected-binary "$selected" \
+            --expected-sha256 "$selected_sha" \
+            --third-party-notices "release-candidates/$target/THIRD_PARTY_NOTICES.md" \
+            --out-dir release-containers
+          "$selected" --version
+          (cd release-containers && sha256sum "codebase-memory-mcp-$target.tar.gz" | tee "codebase-memory-mcp-$target.tar.gz.sha256")
+
+      - name: Attest archive provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release-containers/codebase-memory-mcp-linux-${{ matrix.arch }}-portable.tar.gz
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hashd-linux-${{ matrix.arch }}-portable
+          path: |
+            release-containers/codebase-memory-mcp-linux-${{ matrix.arch }}-portable.tar.gz
+            release-containers/codebase-memory-mcp-linux-${{ matrix.arch }}-portable.tar.gz.sha256
+          if-no-files-found: error
