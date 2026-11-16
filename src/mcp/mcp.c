@@ -16722,8 +16722,14 @@ static char *handle_search_code(cbm_mcp_server_t *srv, const char *args) {
                                     : scan_started_ms + scan_budget_ms;
     bool scan_deadline_latched = false;
     search_scratch_t scratch;
+    /* hashd patch: the scratch directory goes under $TMPDIR when that names an
+     * absolute path. A process confined by Landlock to its own temporary
+     * folder cannot create an entry in /tmp. */
+    char scratch_tmpdir[CBM_SZ_1K] = {0};
+    (void)cbm_safe_getenv("TMPDIR", scratch_tmpdir, sizeof(scratch_tmpdir), NULL);
+    const char *scratch_default = scratch_tmpdir[0] == '/' ? scratch_tmpdir : cbm_tmpdir();
     const char *scratch_parent =
-        srv->search_scratch_dir_override ? srv->search_scratch_dir_override : cbm_tmpdir();
+        srv->search_scratch_dir_override ? srv->search_scratch_dir_override : scratch_default;
     if (!search_scratch_open(&scratch, scratch_parent, pattern)) {
         bool scan_cancelled = mcp_request_cancelled(srv);
         bool scan_timed_out = cbm_now_ms() >= scan_deadline_ms;
