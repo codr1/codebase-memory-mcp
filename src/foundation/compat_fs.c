@@ -1138,6 +1138,14 @@ bool cbm_mkdir_p_ex(const char *path, int mode, unsigned int policy) {
     }
 
     int flags = O_RDONLY;
+#ifdef O_PATH
+    /* hashd patch: this walk only steps through directories and creates the
+     * missing ones, so it holds each by an O_PATH handle (openat, mkdirat and
+     * fstat all accept one). A caller confined by Landlock can then walk
+     * ancestors it is not allowed to list; an O_RDONLY directory open needs
+     * the read-directory right on "/" and on every ancestor. */
+    flags = O_PATH;
+#endif
 #ifdef O_DIRECTORY
     flags |= O_DIRECTORY;
 #endif
