@@ -1960,6 +1960,20 @@ void cbm_mcp_server_set_auto_index_count_test_hook(cbm_mcp_server_t *srv,
 }
 #endif
 
+/* hashd patch: CBM_SESSION_PROJECT names the session's project. A session's
+ * project is otherwise derived from its root path, so the watcher, auto-index
+ * and the session-project checks follow the path's name and never see an
+ * index that index_repository made under another one (its `name` argument).
+ * The value is normalized exactly as that argument is. Unset or empty, the
+ * path's name is used as before. */
+static char *session_project_name(const char *session_root) {
+    char named[CBM_SZ_256];
+    if (cbm_safe_getenv("CBM_SESSION_PROJECT", named, sizeof(named), NULL) && named[0]) {
+        return cbm_project_name_from_path(named);
+    }
+    return cbm_project_name_from_path(session_root);
+}
+
 bool cbm_mcp_server_set_session_context(cbm_mcp_server_t *srv, const char *session_root,
                                         const char *allowed_root) {
     if (!srv || !session_root || session_root[0] == '\0' ||
@@ -1967,7 +1981,7 @@ bool cbm_mcp_server_set_session_context(cbm_mcp_server_t *srv, const char *sessi
         return false;
     }
 
-    char *project = cbm_project_name_from_path(session_root);
+    char *project = session_project_name(session_root);
     if (!project || project[0] == '\0' || strlen(project) >= sizeof(srv->session_project)) {
         free(project);
         return false;
@@ -20662,7 +20676,7 @@ static void detect_session(cbm_mcp_server_t *srv) {
      * used by the pipeline, otherwise session queries look for a .db file
      * that doesn't match the indexed project name. */
     if (srv->session_root[0]) {
-        char *pname = cbm_project_name_from_path(srv->session_root);
+        char *pname = session_project_name(srv->session_root);
         if (pname) {
             snprintf(srv->session_project, sizeof(srv->session_project), "%s", pname);
             free(pname);
