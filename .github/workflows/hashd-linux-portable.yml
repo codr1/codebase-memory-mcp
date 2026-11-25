@@ -10,7 +10,7 @@ name: hashd Linux portable
 on:
   push:
     branches:
-      - 'hashd/v*'
+      - "hashd/v*"
 
 permissions:
   contents: read
@@ -23,8 +23,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Not ubuntu-latest: the 26.04 image installs Ubuntu's amd64v3 package
+          # variants, and the static link then bakes x86-64-v3 glibc into the binary.
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
@@ -46,6 +48,12 @@ jobs:
         run: |
           file build/c/codebase-memory-mcp
           ldd build/c/codebase-memory-mcp 2>&1 | grep -q "not a dynamic executable" || ldd build/c/codebase-memory-mcp 2>&1 | grep -q "statically linked"
+
+      - name: Verify the binary runs on a baseline x86-64 CPU
+        if: matrix.arch == 'amd64'
+        run: |
+          sudo apt-get install -y qemu-user
+          qemu-x86_64 -cpu qemu64 build/c/codebase-memory-mcp --version
 
       - name: Derive candidates and package the stripped one
         run: |
